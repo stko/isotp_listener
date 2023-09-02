@@ -1,35 +1,62 @@
+/*
+
+isotp_listener Demo
+https://github.com/stko/isotp_listener
+
+cansocket routines taken from https://github.com/craigpeacock/CAN-Examples
+
+
+*/
+
+// standards
 #include <iostream>
+#include <iomanip>
 #include <cstring>
 #include <memory>
 
+// socket stuff
 #include <net/if.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <fcntl.h>
 #include <unistd.h>
 
+// timing
+#include <chrono>
+#include <thread>
+
+// socket can
 #include <linux/can.h>
 #include <linux/can/raw.h>
 
+// isotp_listener itself
 #include "isotp_listener.h"
 
-int create_can_send_socket(const char *name, int timeout_ms)
+// the global socket
+
+int socket_send = -1;
+
+// little helper for error handling
+int guard(int n, const char *err)
+{
+  if (n == -1)
+  {
+    perror(err);
+    exit(1);
+  }
+  return n;
+}
+
+// creates the socket can socket
+int create_can_socket(const char *name, int timeout_ms)
 {
   int sockfd;
   struct sockaddr_can addr;
   struct ifreq ifr;
 
-  if ((sockfd = socket(PF_CAN, SOCK_RAW, CAN_RAW)) < 0)
-  {
-    perror("Socket");
-    return 1;
-  }
-
-// LINUX
-struct timeval tv;
-tv.tv_sec = timeout_ms / 1000;
-tv.tv_usec = timeout_ms % 1000;
-setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
-
+  sockfd = guard(socket(PF_CAN, SOCK_RAW, CAN_RAW), "can't open Socket");
+  int flags = guard(fcntl(sockfd, F_GETFL), "could not get flags on TCP listening socket");
+  guard(fcntl(sockfd, F_SETFL, flags | O_NONBLOCK), "could not set TCP listening socket to be non-blocking");
 
   std::strcpy(ifr.ifr_name, name);
   ioctl(sockfd, SIOCGIFINDEX, &ifr);
@@ -38,64 +65,98 @@ setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
   addr.can_family = AF_CAN;
   addr.can_ifindex = ifr.ifr_ifindex;
 
-  if (bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
-  {
-    perror("Bind");
-    return -1;
-  }
+  guard(bind(sockfd, (struct sockaddr *)&addr, sizeof(addr)), "Bind error");
+
   return sockfd;
+}
+
+// returns a tuple of a received frame and True, if valid
+std::pair<can_frame, bool> receive(int socket)
+{
+
+  struct can_frame frame;
+  int count;
+  int i;
+
+  count = read(socket, &frame, sizeof(struct can_frame));
+  if (count < 0)
+  {
+    return std::pair<can_frame, bool>(frame, false);
+  }
+
+  std::cout << std::hex
+            << std::uppercase
+            << std::setw(4)
+            << std::setfill('0')
+            << frame.can_id
+            << " ["
+            << (int)frame.can_dlc
+            << "] ";
+
+  for (i = 0; i < frame.can_dlc; i++)
+    std::cout << std::hex
+              << std::uppercase
+              << std::setw(2)
+              << std::setfill('0')
+              << (int)frame.data[i]
+              << " ";
+  std::cout << "\n";
+  return std::pair<can_frame, bool>(frame, true);
+}
+
+int msg_send(int can_id, unsigned char data[8], int len)
+{
+  struct can_frame frame;
+  frame.can_id = can_id;
+  len = len > 8 ? 8 : len;
+  frame.can_dlc = len;
+  for (int i = 0; i < len; i++)
+  {
+    frame.data[i] = data[i];
+  };
+
+  if (write(socket_send, &frame, sizeof(struct can_frame)) != sizeof(struct can_frame))
+  {
+    perror("Can't write to socket");
+    return 1;
+  }
+  return 0;
 }
 
 int main()
 {
 
-	int i; 
-	int nbytes;
+  int i;
+  int nbytes;
+  int last_can_id = 0;
 
-  int socket_send = create_can_send_socket("vcan0",5000);
+  socket_send = create_can_socket("vcan0", 5000);
 
   struct can_frame frame;
 
-  std::cout << "Willkommen"
-            << " bei C++" << '!' << "\n";
+  std::cout << "Welcome\n";
 
-	frame.can_id = 0x555;
-	frame.can_dlc = 5;
-	frame.data[0]=1;
-
-	if (write(socket_send, &frame, sizeof(struct can_frame)) != sizeof(struct can_frame)) {
-		perror("Write");
-		return 1;
-	}
-
-	nbytes = read(socket_send, &frame, sizeof(struct can_frame));
-
- 	if (nbytes < 0) {
-		perror("Read");
-		return 1;
-	}
-
-	if (close(socket_send) < 0) {
-		perror("Close");
-		return 1;
-	}
+  Isotp_Listener udslisten(0x7E1, 0XDFF, &msg_send);
 
 
-	printf("0x%03X [%d] ",frame.can_id, frame.can_dlc);
+  while (last_can_id != 0x7ff)
+  {
 
-	for (i = 0; i < frame.can_dlc; i++)
-		printf("%02X ",frame.data[i]);
+    std::pair<can_frame, bool> received_frame = receive(socket_send);
+    if (received_frame.second)
+    {
+      last_can_id = received_frame.first.can_id;
+      std::cout << "frame id 0x" << last_can_id << " " << 0x7ff << "\n";
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
 
+  // close the socket
+  if (close(socket_send) < 0)
+  {
+    perror("Close");
+    return 1;
+  }
 
-
-
-
-	return 0;
-
-  Isotp_Listener myObj(2023, 9, 2); // Create an object of MyClass
-
-  // Print attribute values
-  std::cout << myObj.getYear() << "\n";
-  std::cout << myObj.getMonth() << "\n";
   return 0;
 }

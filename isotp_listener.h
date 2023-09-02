@@ -4,18 +4,13 @@
 class Isotp_Listener
 {
 private:
-    int m_year;
-    int m_month;
-    int m_day;
+    int physical_address;
+    int functional_address;
+    int(*send_telegram)(int,unsigned char[8],int len);
 
 public:
-    Isotp_Listener(int year, int month, int day);
-
-    void SetDate(int year, int month, int day);
-
-    int getYear() { return m_year; }
-    int getMonth() { return m_month; }
-    int getDay()  { return m_day; }
+    Isotp_Listener(int physical_address, int functional_address, int(*send_telegram)(int,unsigned char[8],int len));
+    void tick(int time_ticks);
 };
 
 #endif

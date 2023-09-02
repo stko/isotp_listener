@@ -6,16 +6,18 @@ uds state machine from https://github.com/stko/oobd/blob/master/interface/OOBD/v
 
 #include "isotp_listener.h"
 
-// Date constructor
-Isotp_Listener::Isotp_Listener(int year, int month, int day)
+// Isotp_Listener constructor
+Isotp_Listener::Isotp_Listener(int physical_address, int functional_address, int(*send_telegram)(int,unsigned char[8],int len)):
+physical_address (physical_address),
+functional_address(functional_address),
+send_telegram(send_telegram)
 {
-    SetDate(year, month, day);
+ unsigned char data[] = {7, 6, 5, 4, 3, 2, 1, 0};
+  send_telegram(physical_address, data, 8);
+
 }
 
-// Date member function
-void Isotp_Listener::SetDate(int year, int month, int day)
+// Isotp_Listener member function
+void Isotp_Listener::tick(int time_ticks)
 {
-    m_month = month;
-    m_day = day;
-    m_year = year;
 }
