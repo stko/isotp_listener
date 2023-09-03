@@ -34,7 +34,7 @@ cansocket routines taken from https://github.com/craigpeacock/CAN-Examples
 
 // the global socket
 
-int socket_send = -1;
+int can_socket = -1;
 
 // little helper for error handling
 int guard(int n, const char *err)
@@ -121,7 +121,7 @@ int msg_send(int can_id, unsigned char data[8], int len)
     frame.data[i] = data[i];
   };
 
-  if (write(socket_send, &frame, sizeof(struct can_frame)) != sizeof(struct can_frame))
+  if (write(can_socket, &frame, sizeof(struct can_frame)) != sizeof(struct can_frame))
   {
     perror("Can't write to socket");
     return 1;
@@ -129,22 +129,63 @@ int msg_send(int can_id, unsigned char data[8], int len)
   return 0;
 }
 
-int uds_handler(RequestType request_type , unsigned char request[7]){
-  std::cout << "bla\n";
+/*
+uds_handler gets either a flow control request or a service request, if a complete message has been received
+
+uds_handler returns true if the service shall be further proceed
+  in case of flow control request the send buffer shall be set as follow:
+    * Byte 0 lower Nibble: FS = Flow Status (0 = Clear to send, 1 = Wait, 2 = Overflow)
+    * Byte 1: BS = Block Size of maximal continious CFs (max. = 255), 0= no limit
+    * Byte 3:ST = min. Separation Time between continious CFs
+  in case of service request the send buffer shall be set as follow:
+    * Byte 0 = SIDPR (SIDRQ + 0x40) (= Byte 0 of receive buffer)
+    * Byte 1 = Sub fn  (= Byte 1 of receive buffer)
+    * Byte 2 = DID  (= Byte 2 of receive buffer)
+    * Byte 3 .. Byte n : data
+  send_len= total len of bytes to send
+
+
+it returns false if the service shall be canceled. The send buffer shall be set as follow: (https://www.rfwireless-world.com/Terminology/UDS-NRC-codes.html)
+  * Byte 0 : 0x7F ( NR_SID General Response Error)
+  * Byte 1: SIDRQ (= Byte 0 of receive buffer)
+  * Byte 3: NRC : Negative response code
+
+
+*/
+bool uds_handler(RequestType request_type, uds_buffer receive_buffer, int recv_len, uds_buffer send_buffer, int & send_len)
+{
+  if (request_type == RequestType::Service)
+  {
+    if (receive_buffer[0] == Service::ReadDTC)
+    {
+      std::cout << "read DTC\n";
+      send_buffer[0]=receive_buffer[0]+0x40;
+      send_buffer[1]=receive_buffer[1];
+      send_buffer[2]=receive_buffer[2];
+      send_len=rand() % 20;
+      for (int i =0 ; i < send_len; i++){
+        send_buffer[3+ i]= 3; //(unsigned char)rand()% 256;
+      }
+      send_len= send_len +3 ; // don't forget the header
+      return true;
+    }
+  }
+  return false ; // something went wrong, we should never be here..
 }
 
 int main()
 {
 
   int i;
-  int nbytes;
   int last_can_id = 0;
 
-  socket_send = create_can_socket("vcan0", 5000);
+  can_socket = create_can_socket("vcan0", 5000);
 
   struct can_frame frame;
 
   std::cout << "Welcome\n";
+
+  // prepare the options for uds_listener
   isotp_options options;
   options.source_address = 0x7E1;
   options.target_address = options.source_address | 8;
@@ -155,20 +196,22 @@ int main()
   while (last_can_id != 0x7ff)
   {
 
-    std::pair<can_frame, bool> received_frame = receive(socket_send);
+    std::pair<can_frame, bool> received_frame = receive(can_socket);
     if (received_frame.second)
     {
       last_can_id = received_frame.first.can_id;
       std::cout << "frame id 0x" << last_can_id << " " << 0x7ff << "\n";
       udslisten.eval_msg(received_frame.first.can_id, received_frame.first.data, received_frame.first.can_dlc, timeSinceEpochMillisec());
-    }else{
+    }
+    else
+    {
       udslisten.tick(timeSinceEpochMillisec());
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
 
   // close the socket
-  if (close(socket_send) < 0)
+  if (close(can_socket) < 0)
   {
     perror("Close");
     return 1;

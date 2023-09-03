@@ -8,6 +8,8 @@ see also: https://www.embeddeers.com/knowledge-area/jro-can-isotp-einfach-erklae
 
 #include "isotp_listener.h"
 
+#include <iostream>
+
 // Isotp_Listener constructor
 Isotp_Listener::Isotp_Listener(isotp_options options) : options(options)
 {
@@ -18,6 +20,23 @@ Isotp_Listener::Isotp_Listener(isotp_options options) : options(options)
 // Isotp_Listener member function
 void Isotp_Listener::tick(uint64_t time_ticks)
 {
+}
+
+int Isotp_Listener::copy_to_telegram_buffer()
+{
+  int nr_of_bytes = 0;
+  while (actual_telegram_pos < 8 && actual_send_pos < actual_send_buffer_size)
+  {
+    telegrambuffer[actual_telegram_pos] = send_buffer[actual_send_pos];
+    nr_of_bytes++;
+    actual_telegram_pos++;
+    actual_send_pos++;
+  }
+  for (int i = actual_telegram_pos; i < 8; i++)
+  {
+    telegrambuffer[i] = 0; // fill padding bytes
+  }
+  return nr_of_bytes;
 }
 
 /* checks, if the given can message is a valid isotp message.
@@ -36,32 +55,56 @@ bool Isotp_Listener::eval_msg(int can_id, unsigned char data[8], int len, uint64
     return false; // illegal format
   }
   int frame_identifier = data[0] >> 4;
-  int dl = data[0] >> 4;
+  std::cout << "\nschwupti " << (int)data[0] << "\n";
+  int dl = (int)data[0] & 7;
+  std::cout << "\nschwupti " << dl << "\n";
+  int send_len = 0;
   if (frame_identifier > 3)
   {
     return false; // illegal format
   }
-  if (dl > 7)
+  for (int i = 0; i < dl; i++)
   {
-    return false; // illegal format
+    receive_buffer[i] = data[i + 1];
   }
-  unsigned char request[7];
-  for (int i = 0; i < 6; i++)
-  {
-    request[i] = data[i + 2];
-  }
-  RequestType requesttype = static_cast<RequestType>(frame_identifier);
+  FrameType frametype = static_cast<FrameType>(frame_identifier);
 
-  if (requesttype == RequestType::First)
+  if (frametype == FrameType::First)
   {
-    dl=data[0] &3 *256 +  data[1];
+    dl = ((int)data[0] & 3) * 256 + (int)data[1];
+
+    senden des flow controls & warten auf CFs
   }
-  if (requesttype == RequestType::Single)
+  if (frametype == FrameType::FlowControl)
   {
-    actual_state=ActualState::Sleeping; // reset all activities
-    options.uds_handler(RequestType::Single, request);
+    werte speichern und beginnen mit dem Senden
+
+  }
+  if (frametype == FrameType::Single)
+  {
+    actual_state = ActualState::Sleeping; // reset all activities
+    if (options.uds_handler(RequestType::Service, receive_buffer, dl, send_buffer, actual_send_buffer_size))
+    {
+      if (actual_send_buffer_size < 8) // fits into a single frame
+      {
+        telegrambuffer[0] = actual_send_buffer_size; // single frame
+        int nr_of_bytes = 1;
+        actual_telegram_pos = 1; // the first byte is already used
+        actual_send_pos=0;
+        nr_of_bytes = nr_of_bytes + copy_to_telegram_buffer();
+        options.send_telegram(options.target_address, telegrambuffer, nr_of_bytes);
+      }else{ // first frame...
+        telegrambuffer[0]=0x10 | actual_send_buffer_size >> 8;
+        telegrambuffer[1]= actual_send_buffer_size & 0xFF;
+        int nr_of_bytes = 2;
+        actual_telegram_pos = 2; // the two bytes are already used
+        actual_send_pos=0;
+        nr_of_bytes = nr_of_bytes + copy_to_telegram_buffer();
+        options.send_telegram(options.target_address, telegrambuffer, nr_of_bytes);
+        actual_state = ActualState::FlowControl; // wait for flow control     
+      }
+    }
     tick(ticks);
     return true; // message handled
-
   }
 }
