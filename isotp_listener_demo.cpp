@@ -47,6 +47,12 @@ int guard(int n, const char *err)
   return n;
 }
 
+uint64_t timeSinceEpochMillisec()
+{
+  using namespace std::chrono;
+  return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+}
+
 // creates the socket can socket
 int create_can_socket(const char *name, int timeout_ms)
 {
@@ -123,6 +129,10 @@ int msg_send(int can_id, unsigned char data[8], int len)
   return 0;
 }
 
+int uds_handler(RequestType request_type , unsigned char request[7]){
+  std::cout << "bla\n";
+}
+
 int main()
 {
 
@@ -135,9 +145,12 @@ int main()
   struct can_frame frame;
 
   std::cout << "Welcome\n";
-
-  Isotp_Listener udslisten(0x7E1, 0XDFF, &msg_send);
-
+  isotp_options options;
+  options.source_address = 0x7E1;
+  options.target_address = options.source_address | 8;
+  options.send_telegram = &msg_send;
+  options.uds_handler = &uds_handler;
+  Isotp_Listener udslisten(options);
 
   while (last_can_id != 0x7ff)
   {
@@ -147,6 +160,9 @@ int main()
     {
       last_can_id = received_frame.first.can_id;
       std::cout << "frame id 0x" << last_can_id << " " << 0x7ff << "\n";
+      udslisten.eval_msg(received_frame.first.can_id, received_frame.first.data, received_frame.first.can_dlc, timeSinceEpochMillisec());
+    }else{
+      udslisten.tick(timeSinceEpochMillisec());
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
