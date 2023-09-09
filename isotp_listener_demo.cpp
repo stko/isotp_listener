@@ -162,7 +162,7 @@ bool uds_handler(RequestType request_type, uds_buffer receive_buffer, int recv_l
       send_buffer[0]=receive_buffer[0]+0x40;
       send_buffer[1]=receive_buffer[1];
       send_buffer[2]=receive_buffer[2];
-      send_len=rand() % 20;
+      send_len=rand() % 200;
       for (int i =0 ; i < send_len; i++){
         send_buffer[3+ i]= 3; //(unsigned char)rand()% 256;
       }
@@ -201,7 +201,7 @@ int main()
     {
       last_can_id = received_frame.first.can_id;
       std::cout << "frame id 0x" << last_can_id << " " << 0x7ff << "\n";
-      udslisten.eval_msg(received_frame.first.can_id, received_frame.first.data, received_frame.first.can_dlc, timeSinceEpochMillisec());
+      udslisten.eval_msg(received_frame.first.can_id, received_frame.first.data, received_frame.first.can_dlc);
     }
     else
     {

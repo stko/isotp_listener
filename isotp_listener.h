@@ -9,7 +9,19 @@ typedef unsigned char uds_buffer[UDS_BUFFER_SIZE];
 
 enum class RequestType { Service, FlowControl };
 enum class FrameType { Single, First, Consecutive, FlowControl };
-enum class ActualState { Sleeping, First, Consecutive, FlowControl };
+enum class ActualState { Sleeping, First, Consecutive, WaitConsecutive, FlowControl };
+
+
+// DEBUG output - (un)comment as needed
+#define DEBUG(x) do { std::cerr << x; } while (0)
+//#define DEBUG(x)
+
+
+#define MSG_NO_UDS 0
+#define MSG_UDS_OK 1
+#define MSG_UDS_WRONG_FORMAT -1 // message format out of spec
+#define MSG_UDS_UNEXPECTED_CF -2 // not wating for a CF
+#define MSG_UDS_ERROR -3 // unclear error
 
 struct isotp_options
 {
@@ -36,7 +48,8 @@ class Isotp_Listener
 {
 private:
     isotp_options options;
-    uint64_t last_tick=0;
+    uint64_t last_action_tick=0;
+    uint64_t this_tick=0;
     ActualState actual_state=ActualState::Sleeping;
     uds_buffer receive_buffer;
     uds_buffer send_buffer;
@@ -44,16 +57,21 @@ private:
     int actual_telegram_pos;
     int actual_send_pos;
     int actual_send_buffer_size;
+    int actual_receive_pos;
+    int expected_receive_buffer_size;
     int actual_cf_count;
-    int max_cf_count;
+    int flow_control_block_size;
     int consecutive_frame_delay;
-    int consecutive_frame_counter;
 
 public:
     Isotp_Listener(isotp_options options);
     void tick(uint64_t time_ticks);
-    bool eval_msg(int can_id, unsigned char data[8], int len, uint64_t ticks);
+    int eval_msg(int can_id, unsigned char data[8], int len);
+    void send(unsigned char * data, int len);
 private:
     int copy_to_telegram_buffer();
+    int read_from_can_msg(unsigned char data[8], int start, int len);
+    void send_cf_telegram();
+    void handle_received_message(int len);
 };
 #endif
