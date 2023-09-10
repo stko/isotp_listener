@@ -3,8 +3,11 @@
 
 #include <cstdint>
 
-#define UDS_BUFFER_SIZE 4096
+// DEBUG output - (un)comment as needed
+#define DEBUG(x) do { std::cerr << x; } while (0)
+//#define DEBUG(x)
 
+#define UDS_BUFFER_SIZE 4095
 typedef unsigned char uds_buffer[UDS_BUFFER_SIZE];
 
 enum class RequestType { Service, FlowControl };
@@ -12,17 +15,15 @@ enum class FrameType { Single, First, Consecutive, FlowControl };
 enum class ActualState { Sleeping, First, Consecutive, WaitConsecutive, FlowControl };
 
 
-// DEBUG output - (un)comment as needed
-#define DEBUG(x) do { std::cerr << x; } while (0)
-//#define DEBUG(x)
-
-
-#define MSG_NO_UDS 0
-#define MSG_UDS_OK 1
+// eval_msg return codes
+#define MSG_NO_UDS 0 // no uds message, should be proceded by the application
+#define MSG_UDS_OK 1 // successfully handled by isotp_listener
 #define MSG_UDS_WRONG_FORMAT -1 // message format out of spec
 #define MSG_UDS_UNEXPECTED_CF -2 // not wating for a CF
 #define MSG_UDS_ERROR -3 // unclear error
 
+
+// structure to initialize the isotp_listener constructor
 struct isotp_options
 {
     int source_address=0;
@@ -36,14 +37,17 @@ struct isotp_options
 
 };
 
+
+// a (growing) list of UDS services
 class Service
 {
     public:
+    static unsigned char const ClearDTCs= 0x14;
     static unsigned char const ReadDTC= 0x19;
 } ;
 
 
-
+// the Isotp_Listener class
 class Isotp_Listener
 {
 private:
@@ -67,7 +71,6 @@ public:
     Isotp_Listener(isotp_options options);
     void tick(uint64_t time_ticks);
     int eval_msg(int can_id, unsigned char data[8], int len);
-    void send(unsigned char * data, int len);
 private:
     int copy_to_telegram_buffer();
     int read_from_can_msg(unsigned char data[8], int start, int len);
