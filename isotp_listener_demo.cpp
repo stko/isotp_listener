@@ -7,7 +7,7 @@ https://github.com/stko/isotp_listener
 a little application listening on socketcan on vcan0. Each received can message is passed to isotp_listener, so
 that isotp_listener can handle all incoming uds messages.
 
-To allow isotp_listener the whole message handling, udslisten.tick(timeSinceEpochMillisec()) need to be called all 
+To allow isotp_listener the whole message handling, udslisten.tick(timeSinceEpochMillisec()) need to be called all
 few milliseconds.
 
 Whenever isotp_listener finds an incoming uds request, it calls the callback function to let the application react on
@@ -58,7 +58,7 @@ int guard(int n, const char *err)
   return n;
 }
 
-//get the actual system ticks as milliseconda
+// get the actual system ticks as milliseconda
 uint64_t timeSinceEpochMillisec()
 {
   using namespace std::chrono;
@@ -99,7 +99,6 @@ std::pair<can_frame, bool> receive(int socket)
   return std::pair<can_frame, bool>(frame, count >= 0);
 }
 
-
 // callback function for istotp_listener to allow to send own can messages
 int msg_send(int can_id, unsigned char data[8], int len)
 {
@@ -119,7 +118,6 @@ int msg_send(int can_id, unsigned char data[8], int len)
   }
   return 0;
 }
-
 
 /*
 the callback function which is called when isotp_listener has received a complete uds message
@@ -144,11 +142,12 @@ uds_handler gets either a flow control request (not supported yet) or a service 
   send_len= 3
 
 
-uds_handler returns true if the service shall be further proceed, otherways return false
+uds_handler returns the size of the buffer to be send, 0 if no answer is wanted or possible
 
 */
-bool uds_handler(RequestType request_type, uds_buffer receive_buffer, int receive_len, uds_buffer send_buffer, int &send_len)
+int uds_handler(RequestType request_type, uds_buffer receive_buffer, int receive_len, uds_buffer send_buffer)
 {
+  int send_len = 0;
   if (request_type == RequestType::Service)
   {
     if (receive_buffer[0] == Service::ReadDTC)
@@ -172,21 +171,22 @@ bool uds_handler(RequestType request_type, uds_buffer receive_buffer, int receiv
         {
           send_buffer[i] = receive_buffer[i];
         }
-        return true;
+        return send_len;
       }
     }
-    if (receive_buffer[0] == Service::ClearDTCs){
-        std::cout << "Clear DTC\n";
+    if (receive_buffer[0] == Service::ClearDTCs)
+    {
+      std::cout << "Clear DTC\n";
       // clear Errors
     }
   }
-  return false; // something went wrong, we should never be here..
+  return send_len; // something went wrong, we should never be here..
 }
 
 int main()
 {
   int i;
-  int last_can_id = 0; 
+  int last_can_id = 0;
   struct can_frame frame;
 
   std::cout << "Welcome to the isotp_listender demo\n";
@@ -194,20 +194,24 @@ int main()
 
   // prepare the options for uds_listener
   isotp_options options;
-  options.source_address = 0x7E1; // listen on can ID 
+  options.source_address = 0x7E1;                      // listen on can ID
   options.target_address = options.source_address | 8; // uds answer address
-  options.send_telegram = &msg_send; // assign callback function to allow isotp_listener to send messages
-  options.uds_handler = &uds_handler; // assign callback function to allow isotp_listener to announce incoming requests
+  options.bs = 100;                                    // The block size sent in the flow control message. Indicates the number of consecutive frame a sender can send before the socket sends a new flow control. A block size of 0 means that no additional flow control message will be sent (block size of infinity)
+  options.stmin = 5;                                   // time to wait
+  options.send_frame = &msg_send;                   // assign callback function to allow isotp_listener to send messages
+  options.uds_handler = &uds_handler;                  // assign callback function to allow isotp_listener to announce incoming requests
 
-  Isotp_Listener udslisten(options);  // create the isotp_listener object
-
+  Isotp_Listener udslisten(options); // create the isotp_listener object
+  unsigned char data[]="ABCDEFGHIJKLM";
+  udslisten.send_telegram(data,sizeof(data));
   while (last_can_id != 0x7ff) // for testing purposes: Loop until a 0x7FF mesage comes in
   {
     std::pair<can_frame, bool> received_frame = receive(can_socket);
     if (received_frame.second) // if a message comes in
     {
       last_can_id = received_frame.first.can_id;
-      if (!udslisten.eval_msg(received_frame.first.can_id, received_frame.first.data, received_frame.first.can_dlc)){
+      if (!udslisten.eval_msg(received_frame.first.can_id, received_frame.first.data, received_frame.first.can_dlc))
+      {
         // e.g. do the normal application stuff here
       }
     }
@@ -219,7 +223,7 @@ int main()
   }
 
   // close the socket
-  guard(close(can_socket) ,"Error on closing the socket");
+  guard(close(can_socket), "Error on closing the socket");
 
   return 0;
 }

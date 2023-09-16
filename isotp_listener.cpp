@@ -71,7 +71,7 @@ void Isotp_Listener::send_cf_telegram()
   actual_telegram_pos = 1; // the first byte is already used
   int bytes_of_message = copy_to_telegram_buffer();
   nr_of_bytes = nr_of_bytes + bytes_of_message;
-  options.send_telegram(options.target_address, telegrambuffer, 8);
+  options.send_frame(options.target_address, telegrambuffer, 8);
   last_action_tick = this_tick; // remember the time of this action
   if (actual_send_pos >= actual_send_buffer_size)
   { // buffer is fully send, job done
@@ -90,18 +90,26 @@ void Isotp_Listener::send_cf_telegram()
   }
 }
 
-/*
- */
-void Isotp_Listener::handle_received_message(int len)
+void Isotp_Listener::send_telegram(uds_buffer data, int nr_of_bytes)
 {
-  DEBUG(len);
-  DEBUG(" Bytes received\n");
-  actual_state = ActualState::Sleeping; // actual not more to be done
-  if (options.uds_handler(RequestType::Service, receive_buffer, len, send_buffer, actual_send_buffer_size))
+  if (nr_of_bytes > UDS_BUFFER_SIZE)
   {
-    DEBUG("Answer with ");
-    DEBUG(actual_send_buffer_size);
-    DEBUG(" Bytes\n");
+            DEBUG("ERROR: data size too big with ");
+            DEBUG(nr_of_bytes);
+            DEBUG(" Bytes");
+  }
+  for (int i = 0; i < nr_of_bytes; i++)
+  {
+    send_buffer[i] = data[i];
+    actual_send_buffer_size = nr_of_bytes;
+  }
+  buffer_tx();
+}
+
+void Isotp_Listener::buffer_tx()
+{
+  if (actual_send_buffer_size)
+  {
     if (actual_send_buffer_size < 8)               // fits into a single frame
     {                                              // generate single frame
       telegrambuffer[0] = actual_send_buffer_size; // single frame
@@ -109,7 +117,7 @@ void Isotp_Listener::handle_received_message(int len)
       actual_telegram_pos = 1; // the first byte is already used
       actual_send_pos = 0;
       nr_of_bytes = nr_of_bytes + copy_to_telegram_buffer();
-      options.send_telegram(options.target_address, telegrambuffer, nr_of_bytes);
+      options.send_frame(options.target_address, telegrambuffer, nr_of_bytes);
     }
     else
     { // generate first frame...
@@ -119,10 +127,24 @@ void Isotp_Listener::handle_received_message(int len)
       actual_telegram_pos = 2; // the first two bytes are already used
       actual_send_pos = 0;
       nr_of_bytes = nr_of_bytes + copy_to_telegram_buffer();
-      options.send_telegram(options.target_address, telegrambuffer, nr_of_bytes);
+      options.send_frame(options.target_address, telegrambuffer, nr_of_bytes);
       actual_state = ActualState::FlowControl; // wait for flow control
     }
   }
+}
+
+/*
+ */
+void Isotp_Listener::handle_received_message(int len)
+{
+  DEBUG(len);
+  DEBUG(" Bytes received\n");
+  actual_state = ActualState::Sleeping; // actual not more to be done
+  actual_send_buffer_size = options.uds_handler(RequestType::Service, receive_buffer, len, send_buffer);
+  DEBUG("Answer with ");
+  DEBUG(actual_send_buffer_size);
+  DEBUG(" Bytes\n");
+  buffer_tx();
 }
 
 /* checks, if the given can message is a isotp message.
@@ -154,6 +176,7 @@ int Isotp_Listener::eval_msg(int can_id, unsigned char data[8], int len)
     dl = ((int)data[0] & 0x0F) * 256 + (int)data[1];
     // initialize receive parameters
     actual_receive_pos = 0;
+    receive_cf_count = 1;
     expected_receive_buffer_size = dl;
 
     // store the first received bytes in the receive buffer
@@ -163,7 +186,12 @@ int Isotp_Listener::eval_msg(int can_id, unsigned char data[8], int len)
     telegrambuffer[0] = 0x30;          // FS Flow Status 0= CLear to Send
     telegrambuffer[1] = options.bs;    // BS Block Size
     telegrambuffer[2] = options.stmin; // ST min. Separation Time
-    options.send_telegram(options.target_address, telegrambuffer, 3);
+    options.send_frame(options.target_address, telegrambuffer, 3);
+    receive_flow_control_block_count = options.bs;
+    if (receive_flow_control_block_count == 0)
+    {
+      receive_flow_control_block_count = -1;
+    }
     actual_state = ActualState::WaitConsecutive; // wait for Consecutive Frames
   }
   if (frametype == FrameType::FlowControl)
@@ -213,14 +241,43 @@ int Isotp_Listener::eval_msg(int can_id, unsigned char data[8], int len)
     // DEBUG("Consecutive Frame\n");
     if (actual_state == ActualState::WaitConsecutive)
     {
+      if (receive_cf_count != (data[0] & 0x0F))
+      {
+        DEBUG("wrong CF sequence number\n");
+        // send cancelation flow control
+        telegrambuffer[0] = 0x32; // FS Flow Status 2= Overflow
+        telegrambuffer[1] = 0;
+        telegrambuffer[2] = 0;
+        options.send_frame(options.target_address, telegrambuffer, 3);
+        return MSG_UDS_UNEXPECTED_CF;
+      }
+      receive_cf_count = ++receive_cf_count & 0x0F;
       if (read_from_can_msg(data, 1, expected_receive_buffer_size - actual_receive_pos))
       {
         if (actual_receive_pos == expected_receive_buffer_size) // full message received
         {
           actual_state = ActualState::Sleeping; // stop all activities
           handle_received_message(expected_receive_buffer_size);
+          return MSG_UDS_OK; // message handled
         }
-        return MSG_UDS_OK; // message handled
+        if (receive_flow_control_block_count > -1)
+        { // there's a limit set
+          receive_flow_control_block_count > 0 ? receive_flow_control_block_count-- : 0;
+          if (receive_flow_control_block_count == 0)
+          {
+            // send another flow control
+            telegrambuffer[0] = 0x30;          // FS Flow Status 0= CLear to Send
+            telegrambuffer[1] = options.bs;    // BS Block Size
+            telegrambuffer[2] = options.stmin; // ST min. Separation Time
+            options.send_frame(options.target_address, telegrambuffer, 3);
+            receive_flow_control_block_count = options.bs;
+            if (receive_flow_control_block_count == 0)
+            {
+              receive_flow_control_block_count = -1;
+            }
+          }
+          return MSG_UDS_OK; // message handled
+        }
       }
       else // something went wrong...
       {
@@ -231,6 +288,11 @@ int Isotp_Listener::eval_msg(int can_id, unsigned char data[8], int len)
     else
     {
       DEBUG("unexpected CF\n");
+      // send cancelation flow control
+      telegrambuffer[0] = 0x32; // FS Flow Status 2= Overflow
+      telegrambuffer[1] = 0;
+      telegrambuffer[2] = 0;
+      options.send_frame(options.target_address, telegrambuffer, 3);
       return MSG_UDS_UNEXPECTED_CF;
     }
   }
