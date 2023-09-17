@@ -15,8 +15,22 @@ Isotp_Listener::Isotp_Listener(isotp_options options) : options(options)
 {
 }
 
-// periodic tick call to allow consecutive frame generation
-void Isotp_Listener::tick(uint64_t time_ticks)
+void Isotp_Listener::update_options(isotp_options new_options){
+  options=new_options;
+}
+
+isotp_options Isotp_Listener::get_options(){
+  return options;
+}
+
+
+/*
+periodic tick call to allow consecutive frame generation
+
+return once true, if a timeout is reached, otherways always false
+
+*/
+bool Isotp_Listener::tick(uint64_t time_ticks)
 {
   this_tick = time_ticks;
   if (actual_state == ActualState::Consecutive)
@@ -27,6 +41,17 @@ void Isotp_Listener::tick(uint64_t time_ticks)
       send_cf_telegram();
     }
   }
+  if ( // are we waiting for something?
+      actual_state == ActualState::FlowControl || actual_state == ActualState::WaitConsecutive)
+  {
+    if (last_frame_received_tick + options.frame_timeout < this_tick)
+    { // waited too long
+    DEBUG("Tick timeout\n");
+      actual_state = ActualState::Sleeping;
+      return true;
+    }
+  }
+  return false;
 }
 
 // transfers data from the send buffer into the can message and set all data accordingly
@@ -94,9 +119,9 @@ void Isotp_Listener::send_telegram(uds_buffer data, int nr_of_bytes)
 {
   if (nr_of_bytes > UDS_BUFFER_SIZE)
   {
-            DEBUG("ERROR: data size too big with ");
-            DEBUG(nr_of_bytes);
-            DEBUG(" Bytes");
+    DEBUG("ERROR: data size too big with ");
+    DEBUG(nr_of_bytes);
+    DEBUG(" Bytes");
   }
   for (int i = 0; i < nr_of_bytes; i++)
   {
@@ -168,6 +193,8 @@ int Isotp_Listener::eval_msg(int can_id, unsigned char data[8], int len)
   {
     return MSG_UDS_WRONG_FORMAT; // illegal format
   }
+  // remember that a valid frame came in
+  last_frame_received_tick = this_tick; // remember the time of this action
   FrameType frametype = static_cast<FrameType>(frame_identifier);
 
   if (frametype == FrameType::First)
@@ -297,4 +324,12 @@ int Isotp_Listener::eval_msg(int can_id, unsigned char data[8], int len)
     }
   }
   return MSG_UDS_ERROR; // message handled
+}
+
+/*
+True if a transfer is actual ongoing
+ */
+bool Isotp_Listener::busy()
+{
+  return actual_state != ActualState::Sleeping;
 }
