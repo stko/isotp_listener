@@ -15,18 +15,15 @@
 typedef unsigned char uds_buffer[UDS_BUFFER_SIZE];
 
 
-typedef struct RequestType  
+typedef struct   
 {
     unsigned char const Service ;
     unsigned char const FlowControl;
 } RequestType;
 
-RequestType requestType = {
-    .Service = 0x00,
-    .FlowControl = 0x01
-};
 
-typedef struct FrameType
+
+typedef struct 
 {
     unsigned char const Single;
     unsigned char const First;
@@ -34,26 +31,16 @@ typedef struct FrameType
     unsigned char const FlowControl ;
 } FrameType;
 
-FrameType frameType = {
-    .Single = 0,
-    .First = 1,
-    .Consecutive = 2,
-    .FlowControl = 3
-};
 
 // a (growing) list of UDS services
-typedef struct Service
+typedef struct 
 {
     unsigned char const ClearDTCs ;
     unsigned char const ReadDTC ;
 } Service;
 
-Service service = {
-    .ClearDTCs = 0x14,
-    .ReadDTC = 0x19
-};
 
-typedef struct ActualState
+typedef struct 
 {
     unsigned char const First;
     unsigned char const Sleeping ;
@@ -62,13 +49,6 @@ typedef struct ActualState
     unsigned char const FlowControl ;
 } ActualState;
 
-ActualState actualState = {
-    .First = 0,
-    .Sleeping = 1,
-    .Consecutive = 2,
-    .WaitConsecutive = 3,
-    .FlowControl = 4
-}; 
 
 // eval_msg return codes
 #define MSG_NO_UDS 0             // no uds message, should be proceded by the application
@@ -78,8 +58,8 @@ ActualState actualState = {
 #define MSG_UDS_ERROR -3         // unclear error
 
 // Function pointer types to mimic Python's callback functions
-typedef void (*send_frame)(uint32_t can_id, uint8_t *data, size_t nr_of_bytes);
-typedef int (*uds_handler)(unsigned char type, uint8_t *rx_data, size_t rx_size, uint8_t *tx_buffer);
+// typedef void (*send_frame)(uint32_t can_id, uint8_t *data, size_t nr_of_bytes);
+// typedef size_t (*uds_handler)(unsigned char type, uint8_t *rx_data, size_t rx_size, uint8_t *tx_buffer);
 
 
 // structure to initialize the isotp_listener constructor
@@ -92,7 +72,7 @@ struct sIsoTpOptions
     int wftmax;              // Maximum number of wait frame (flow control message with flow status=1) allowed before dropping a message. 0 means that wait frame are not allowed
     int frame_timeout ; // maximal allowed time in ms between two received frames to keep the transfer active
     void (*send_frame)(uint32_t can_id, uint8_t *data, size_t nr_of_bytes); // Function to send a CAN message. This function will be called by the isotp_listener to send a CAN message
-    int (*uds_handler)(unsigned char type, uint8_t *rx_data, size_t rx_size, uint8_t *tx_buffer); // Function to handle UDS messages. This function will be called by the isotp_listener when a complete UDS message has been received
+    size_t (*uds_handler)(unsigned char type, uint8_t *rx_data, size_t rx_size, uint8_t *tx_buffer); // Function to handle UDS messages. This function will be called by the isotp_listener when a complete UDS message has been received
     //void *send_frame; // Function to send a CAN message. This function will be called by the isotp_listener to send a CAN message
     //int *uds_handler; // Function to handle UDS messages. This function will be called by the isotp_listener when a complete UDS message has been received
 } ;
@@ -103,7 +83,7 @@ typedef struct sIsoTpOptions IsoTpOptions;
 // the Isotp_Listener class
 typedef struct Isotp_Listener
 {
-    struct IsotpOptions * options;
+    IsoTpOptions * options;
     uint64_t last_action_tick;
     uint64_t last_frame_received_tick ;
     uint64_t this_tick ;
@@ -124,6 +104,20 @@ typedef struct Isotp_Listener
 
     //Isotp_Listener(IsotpOptions options);
 
-};
+} Isotp_Listener;
+
+
+// Function prototypes
+void Isotp_Listener_init(struct Isotp_Listener *self, IsoTpOptions * options);
+struct IsoTpOptions get_options(struct Isotp_Listener *self);
+int tick(struct Isotp_Listener *self, int time_ticks);
+int copy_to_telegram_buffer(struct Isotp_Listener *self);
+int read_from_can_msg(struct Isotp_Listener *self, uint8_t *data, int start, int nr_of_bytes);
+void send_cf_telegram(struct Isotp_Listener *self);
+void send_telegram(struct Isotp_Listener *self, uint8_t *data, int nr_of_bytes);
+void buffer_tx(struct Isotp_Listener *self);
+void handle_received_message(struct Isotp_Listener *self, int nr_of_bytes);
+int eval_msg(struct Isotp_Listener *self, uint32_t can_id, uint8_t *data, int nr_of_bytes);
+int busy(struct Isotp_Listener *self);
 #endif // ISOTP_LISTENER_H
 // End of c/isotp_listener.h

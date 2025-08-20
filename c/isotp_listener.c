@@ -4,23 +4,31 @@
 
 #include "isotp_listener.h"
 
+RequestType requestType = {
+    .Service = 0x00,
+    .FlowControl = 0x01
+};
+ActualState actualState = {
+    .First = 0,
+    .Sleeping = 1,
+    .Consecutive = 2,
+    .WaitConsecutive = 3,
+    .FlowControl = 4
+};
+FrameType frameType = {
+    .Single = 0,
+    .First = 1,
+    .Consecutive = 2,
+    .FlowControl = 3
+};
+Service service = {
+    .ClearDTCs = 0x14,
+    .ReadDTC = 0x19
+};
 
-
-// Function prototypes
-void Isotp_Listener_init(struct Isotp_Listener *self, struct IsoTpOptions * options);
-struct IsoTpOptions get_options(struct Isotp_Listener *self);
-int tick(struct Isotp_Listener *self, int time_ticks);
-int copy_to_telegram_buffer(struct Isotp_Listener *self);
-int read_from_can_msg(struct Isotp_Listener *self, uint8_t *data, int start, int nr_of_bytes);
-void send_cf_telegram(struct Isotp_Listener *self);
-void send_telegram(struct Isotp_Listener *self, uint8_t *data, int nr_of_bytes);
-void buffer_tx(struct Isotp_Listener *self);
-void handle_received_message(struct Isotp_Listener *self, int nr_of_bytes);
-int eval_msg(struct Isotp_Listener *self, uint32_t can_id, uint8_t *data, int nr_of_bytes);
-int busy(struct Isotp_Listener *self);
 
 // Isotp_Listener constructor
-void Isotp_Listener_init(struct Isotp_Listener *self, struct IsoTpOptions * options) {
+void Isotp_Listener_init( Isotp_Listener *self,  IsoTpOptions * options) {
     self->options = options;
     self->last_action_tick = 0;
     self->this_tick = 0;

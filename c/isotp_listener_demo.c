@@ -19,6 +19,13 @@
 // The global CAN socket file descriptor
 int s;
 
+extern RequestType requestType;
+extern ActualState actualState;
+extern FrameType frameType;
+extern Service service;
+
+
+
 // Helper function to get current time in milliseconds
 long long get_millis() {
     struct timeval tv;
@@ -107,13 +114,13 @@ int main(void) {
     .target_address = options.source_address | 8,
     .bs = 10,
     .stmin = 5,
-    .send_frame = msg_send,
-    .uds_handler = uds_handler,
+    .send_frame = &msg_send,
+    .uds_handler = &uds_handler,
     .frame_timeout = 100,
     .wftmax = 0,
     };
-    struct Isotp_Listener udslisten;
-    Isotp_Listener_init(&udslisten, options);
+    Isotp_Listener udslisten;
+    Isotp_Listener_init(&udslisten, &options);
 
     // Initial send for demo purposes
     uint8_t data[] = "ABCDEFGHIJK";
