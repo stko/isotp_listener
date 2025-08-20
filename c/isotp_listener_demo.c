@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -39,10 +40,10 @@ void msg_send(uint32_t can_id, uint8_t *data, size_t len) {
 }
 
 // The callback function which is called when isotp_listener has received a complete UDS message
-size_t uds_handler(RequestType request_type, uint8_t *receive_buffer, size_t receive_len, uint8_t *send_buffer) {
+size_t uds_handler(unsigned char request_type, uint8_t *receive_buffer, size_t receive_len, uint8_t *send_buffer) {
     size_t send_len = 0;
 
-    if (request_type == Service) {
+    if (request_type == requestType.Service) {
         if (receive_buffer[0] == 0x19) { // Using magic number 0x19 for Service.ReadDTC
             if (receive_buffer[1] == 0x01) {
                 printf("get number of DTC\n");
@@ -101,17 +102,17 @@ int main(void) {
     }
 
     // Prepare the options for uds_listener
-    IsoTpOptions options;
-    options.source_address = 0x7E1;
-    options.target_address = options.source_address | 8;
-    options.bs = 10;
-    options.stmin = 5;
-    options.send_frame = msg_send;
-    options.uds_handler = uds_handler;
-    options.frame_timeout = 100;
-    options.wftmax = 0;
-
-    Isotp_Listener udslisten;
+    IsoTpOptions options={
+    .source_address = 0x7E1,
+    .target_address = options.source_address | 8,
+    .bs = 10,
+    .stmin = 5,
+    .send_frame = msg_send,
+    .uds_handler = uds_handler,
+    .frame_timeout = 100,
+    .wftmax = 0,
+    };
+    struct Isotp_Listener udslisten;
     Isotp_Listener_init(&udslisten, options);
 
     // Initial send for demo purposes

@@ -6,6 +6,7 @@
 	],
 	"settings": {
 		"files.associations": {
+			"*.embeddedhtml": "html",
 			"cctype": "cpp",
 			"clocale": "cpp",
 			"cmath": "cpp",
@@ -58,7 +59,8 @@
 			"stop_token": "cpp",
 			"streambuf": "cpp",
 			"thread": "cpp",
-			"typeinfo": "cpp"
+			"typeinfo": "cpp",
+			"format": "c"
 		}
 	}
 }

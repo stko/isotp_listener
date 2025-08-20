@@ -1,156 +1,129 @@
+#ifndef ISOTP_LISTENER_H
+#define ISOTP_LISTENER_H
+
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <time.h>
-#include <sys/time.h>
-#include <sys/socket.h>
-#include <sys/ioctl.h>
-#include <net/if.h>
-#include <linux/can.h>
+#include <stdbool.h>
 
-#include "isotp_listener.h"
+// DEBUG output - (un)comment as needed
+#define DEBUG(x) \
+    printf(x)
+// #define DEBUG(x)
 
-#define CAN_ID_EXT_FLAG 0x80000000U
-#define CAN_ID_RTR_FLAG 0x40000000U
-#define CAN_ID_ERR_FLAG 0x20000000U
+#define UDS_BUFFER_SIZE 4095
+typedef unsigned char uds_buffer[UDS_BUFFER_SIZE];
 
-// The global CAN socket file descriptor
-int s;
 
-// Helper function to get current time in milliseconds
-long long get_millis() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    return (long long)tv.tv_sec * 1000 + (long long)tv.tv_usec / 1000;
-}
+typedef struct RequestType  
+{
+    unsigned char const Service ;
+    unsigned char const FlowControl;
+} RequestType;
 
-// Callback function for isotp_listener to send CAN messages
-void msg_send(uint32_t can_id, uint8_t *data, size_t len) {
-    struct can_frame frame;
+RequestType requestType = {
+    .Service = 0x00,
+    .FlowControl = 0x01
+};
 
-    frame.can_id = can_id;
-    frame.can_dlc = len;
-    memcpy(frame.data, data, len);
+typedef struct FrameType
+{
+    unsigned char const Single;
+    unsigned char const First;
+    unsigned char const Consecutive;
+    unsigned char const FlowControl ;
+} FrameType;
 
-    if (write(s, &frame, sizeof(struct can_frame)) != sizeof(struct can_frame)) {
-        perror("Error writing to CAN socket");
-    }
-}
+FrameType frameType = {
+    .Single = 0,
+    .First = 1,
+    .Consecutive = 2,
+    .FlowControl = 3
+};
 
-// The callback function which is called when isotp_listener has received a complete UDS message
-size_t uds_handler(RequestType request_type, uint8_t *receive_buffer, size_t receive_len, uint8_t *send_buffer) {
-    size_t send_len = 0;
+// a (growing) list of UDS services
+typedef struct Service
+{
+    unsigned char const ClearDTCs ;
+    unsigned char const ReadDTC ;
+} Service;
 
-    if (request_type == Service) {
-        if (receive_buffer[0] == 0x19) { // Using magic number 0x19 for Service.ReadDTC
-            if (receive_buffer[1] == 0x01) {
-                printf("get number of DTC\n");
-            } else {
-                printf("read DTC\n");
-                printf("request:");
-                for (int i = 0; i < receive_len; i++) {
-                    printf(" %02x", receive_buffer[i]);
-                }
-                printf("\n");
+Service service = {
+    .ClearDTCs = 0x14,
+    .ReadDTC = 0x19
+};
 
-                send_buffer[0] = receive_buffer[0] + 0x40;
-                send_buffer[1] = receive_buffer[1];
-                send_buffer[2] = receive_buffer[2];
-                send_len = receive_len;
-                for (int i = 3; i < send_len; i++) {
-                    send_buffer[i] = receive_buffer[i];
-                }
-                printf("answer:");
-                for (int i = 0; i < send_len; i++) {
-                    printf(" %02x", send_buffer[i]);
-                }
-                printf("\n");
-                return send_len;
-            }
-        } else if (receive_buffer[0] == 0x14) { // Using magic number 0x14 for Service.ClearDTCs
-            printf("Clear DTC\n");
-        }
-    }
+typedef struct ActualState
+{
+    unsigned char const First;
+    unsigned char const Sleeping ;
+    unsigned char const Consecutive ;
+    unsigned char const WaitConsecutive;
+    unsigned char const FlowControl ;
+} ActualState;
 
-    return send_len;
-}
+ActualState actualState = {
+    .First = 0,
+    .Sleeping = 1,
+    .Consecutive = 2,
+    .WaitConsecutive = 3,
+    .FlowControl = 4
+}; 
 
-int main(void) {
-    printf("Welcome to the isotp_listender demo\n");
+// eval_msg return codes
+#define MSG_NO_UDS 0             // no uds message, should be proceded by the application
+#define MSG_UDS_OK 1             // successfully handled by isotp_listener
+#define MSG_UDS_WRONG_FORMAT -1  // message format out of spec
+#define MSG_UDS_UNEXPECTED_CF -2 // not wating for a CF
+#define MSG_UDS_ERROR -3         // unclear error
 
-    // CAN socket setup
-    struct sockaddr_can addr;
-    struct ifreq ifr;
+// Function pointer types to mimic Python's callback functions
+typedef void (*send_frame)(uint32_t can_id, uint8_t *data, size_t nr_of_bytes);
+typedef int (*uds_handler)(unsigned char type, uint8_t *rx_data, size_t rx_size, uint8_t *tx_buffer);
 
-    if ((s = socket(PF_CAN, SOCK_RAW, CAN_RAW)) < 0) {
-        perror("Error creating socket");
-        return 1;
-    }
 
-    strcpy(ifr.ifr_name, "vcan0");
-    ioctl(s, SIOCGIFINDEX, &ifr);
+// structure to initialize the isotp_listener constructor
+struct sIsoTpOptions
+{
+    uint32_t source_address;      // The source address of the UDS service. This is the address of the ECU that is listening to the CAN bus
+    uint32_t target_address;      // The target address of the UDS service. This is the address of the ECU that is sending the CAN messages
+    int bs;                  // The block size sent in the flow control message. Indicates the number of consecutive frame a sender can send before the socket sends a new flow control. A block size of 0 means that no additional flow control message will be sent (block size of infinity)
+    int stmin;               // The minimum separation time sent in the flow control message. Indicates the amount of time to wait between 2 consecutive frame. This value will be sent as is over CAN. Values from 1 to 127 means milliseconds. Values from 0xF1 to 0xF9 means 100us to 900us. 0 Means no timing requirements
+    int wftmax;              // Maximum number of wait frame (flow control message with flow status=1) allowed before dropping a message. 0 means that wait frame are not allowed
+    int frame_timeout ; // maximal allowed time in ms between two received frames to keep the transfer active
+    void (*send_frame)(uint32_t can_id, uint8_t *data, size_t nr_of_bytes); // Function to send a CAN message. This function will be called by the isotp_listener to send a CAN message
+    int (*uds_handler)(unsigned char type, uint8_t *rx_data, size_t rx_size, uint8_t *tx_buffer); // Function to handle UDS messages. This function will be called by the isotp_listener when a complete UDS message has been received
+    //void *send_frame; // Function to send a CAN message. This function will be called by the isotp_listener to send a CAN message
+    //int *uds_handler; // Function to handle UDS messages. This function will be called by the isotp_listener when a complete UDS message has been received
+} ;
 
-    memset(&addr, 0, sizeof(addr));
-    addr.can_family = AF_CAN;
-    addr.can_ifindex = ifr.ifr_ifindex;
+typedef struct sIsoTpOptions IsoTpOptions;
 
-    if (bind(s, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        perror("Error binding socket");
-        return 1;
-    }
 
-    // Prepare the options for uds_listener
-    IsoTpOptions options;
-    options.source_address = 0x7E1;
-    options.target_address = options.source_address | 8;
-    options.bs = 10;
-    options.stmin = 5;
-    options.send_frame = msg_send;
-    options.uds_handler = uds_handler;
-    options.frame_timeout = 100;
-    options.wftmax = 0;
+// the Isotp_Listener class
+typedef struct Isotp_Listener
+{
+    struct IsotpOptions * options;
+    uint64_t last_action_tick;
+    uint64_t last_frame_received_tick ;
+    uint64_t this_tick ;
+    unsigned char actual_state;
+    uds_buffer receive_buffer;
+    uds_buffer send_buffer;
+    uint8_t telegrambuffer[8];
+    int actual_telegram_pos;
+    int actual_send_pos;
+    int actual_send_buffer_size;
+    int actual_receive_pos;
+    int expected_receive_buffer_size;
+    int actual_cf_count;
+    int receive_cf_count;
+    int flow_control_block_size;
+    int receive_flow_control_block_count;
+    int consecutive_frame_delay;
 
-    Isotp_Listener udslisten;
-    Isotp_Listener_init(&udslisten, options);
+    //Isotp_Listener(IsotpOptions options);
 
-    // Initial send for demo purposes
-    uint8_t data[] = "ABCDEFGHIJK";
-    send_telegram(&udslisten, data, sizeof(data) - 1);
-
-    uint32_t last_can_id = 0;
-    struct can_frame frame;
-    fd_set rdfs;
-    struct timeval tv;
-    int retval;
-    long long current_time_ms;
-
-    while (last_can_id != 0x7FF) {
-        // Use select to wait for data on the socket with a timeout
-        FD_ZERO(&rdfs);
-        FD_SET(s, &rdfs);
-        tv.tv_sec = 0;
-        tv.tv_usec = 5000; // 5 milliseconds (0.005 seconds)
-
-        retval = select(s + 1, &rdfs, NULL, NULL, &tv);
-
-        current_time_ms = get_millis();
-        
-        if (retval > 0 && FD_ISSET(s, &rdfs)) { // A message was received
-            if (read(s, &frame, sizeof(struct can_frame)) < 0) {
-                perror("Error reading from CAN socket");
-            } else {
-                last_can_id = frame.can_id;
-                if (eval_msg(&udslisten, frame.can_id, frame.data, frame.can_dlc) == MSG_NO_UDS) {
-                    // Do normal application stuff here
-                }
-            }
-        } else { // Timeout occurred, no message received
-            tick(&udslisten, current_time_ms);
-        }
-    }
-
-    close(s);
-
-    return 0;
-}
+};
+#endif // ISOTP_LISTENER_H
+// End of c/isotp_listener.h
