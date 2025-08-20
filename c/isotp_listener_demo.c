@@ -114,10 +114,10 @@ int main(void) {
     .target_address = options.source_address | 8,
     .bs = 10,
     .stmin = 5,
+    .wftmax = 0,
+    .frame_timeout = 100,
     .send_frame = &msg_send,
     .uds_handler = &uds_handler,
-    .frame_timeout = 100,
-    .wftmax = 0,
     };
     Isotp_Listener udslisten;
     Isotp_Listener_init(&udslisten, &options);

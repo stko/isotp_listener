@@ -12,6 +12,7 @@
 // #define DEBUG(x)
 
 #define UDS_BUFFER_SIZE 4095
+
 typedef unsigned char uds_buffer[UDS_BUFFER_SIZE];
 
 
@@ -57,10 +58,6 @@ typedef struct
 #define MSG_UDS_UNEXPECTED_CF -2 // not wating for a CF
 #define MSG_UDS_ERROR -3         // unclear error
 
-// Function pointer types to mimic Python's callback functions
-// typedef void (*send_frame)(uint32_t can_id, uint8_t *data, size_t nr_of_bytes);
-// typedef size_t (*uds_handler)(unsigned char type, uint8_t *rx_data, size_t rx_size, uint8_t *tx_buffer);
-
 
 // structure to initialize the isotp_listener constructor
 struct sIsoTpOptions
@@ -76,6 +73,7 @@ struct sIsoTpOptions
     //void *send_frame; // Function to send a CAN message. This function will be called by the isotp_listener to send a CAN message
     //int *uds_handler; // Function to handle UDS messages. This function will be called by the isotp_listener when a complete UDS message has been received
 } ;
+
 
 typedef struct sIsoTpOptions IsoTpOptions;
 
@@ -101,15 +99,12 @@ typedef struct Isotp_Listener
     int flow_control_block_size;
     int receive_flow_control_block_count;
     int consecutive_frame_delay;
-
-    //Isotp_Listener(IsotpOptions options);
-
 } Isotp_Listener;
 
 
 // Function prototypes
 void Isotp_Listener_init(struct Isotp_Listener *self, IsoTpOptions * options);
-struct IsoTpOptions get_options(struct Isotp_Listener *self);
+IsoTpOptions get_options(struct Isotp_Listener *self);
 int tick(struct Isotp_Listener *self, int time_ticks);
 int copy_to_telegram_buffer(struct Isotp_Listener *self);
 int read_from_can_msg(struct Isotp_Listener *self, uint8_t *data, int start, int nr_of_bytes);
